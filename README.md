@@ -10,7 +10,7 @@ also add the following to your moonraker configuration:
 [update_manager client klipper_network_status]
 type: git_repo
 path: /home/pi/klipper_network_status
-origin: https://github.com/JeremyRuhland/klipper_network_status
+origin: https://github.com/Primus27/klipper_network_status
 install_script: install.sh
 ```
 
@@ -41,6 +41,10 @@ name: Wifi SSID: {printer.network_status.wifissid}
 [menu __main __network _wifiip]
 type: command
 name: Wifi IP: {printer.network_status.wifiip}
+
+[menu __main __network _status]
+type: command
+name: Status: {printer.network_status.status}
 ```
 
 I find that the text can be a little long for smaller displays so it may help
