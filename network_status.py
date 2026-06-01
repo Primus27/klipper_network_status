@@ -33,6 +33,36 @@ class network_status:
         self.printer.register_event_handler(
             "klippy:disconnect", self._handle_disconnect
         )
+    
+    @staticmethod
+    def get_ssid(iface: str = "wlan0") -> str | None:
+        """
+        Get SSID from the interface name via the wpa_supplicant socket
+
+        :param iface: Interface name
+        :return: SSID or None (if interface does not exist or has no SSID)
+        """
+        sock_path = f"/var/run/wpa_supplicant/{iface}"
+        if not os.path.exists(sock_path):
+            return None
+        
+        client = f"/tmp/wpa_ctrl_{os.getpid()}"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        s.bind(client)
+        
+        try:
+            s.connect(sock_path)
+            s.send(b"STATUS")
+            data = s.recv(4096).decode()
+            for line in data.splitlines():
+                if line.startswith("ssid="):
+                    return line[5:]  # remove `ssid=` prefix
+        
+        finally:
+            s.close()
+            os.unlink(client)
+        
+        return None
 
     def _handle_ready(self):
         """
