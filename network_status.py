@@ -32,6 +32,7 @@ class InterfaceDetails:
                 details.mac = addr.address
         return details
 
+
 @dataclass
 class NetworkDetails:
     status: Literal["Connected", "Disconnected", "N/A"] = "N/A"
@@ -59,7 +60,7 @@ class network_status:
         self.printer.register_event_handler(
             "klippy:disconnect", self._handle_disconnect
         )
-    
+
     @staticmethod
     def get_ssid(iface: str = "wlan0") -> str | None:
         """
@@ -71,11 +72,11 @@ class network_status:
         sock_path = f"/var/run/wpa_supplicant/{iface}"
         if not os.path.exists(sock_path):
             return None
-        
+
         client = f"/tmp/wpa_ctrl_{os.getpid()}"
         s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         s.bind(client)
-        
+
         try:
             s.connect(sock_path)
             s.send(b"STATUS")
@@ -83,11 +84,11 @@ class network_status:
             for line in data.splitlines():
                 if line.startswith("ssid="):
                     return line[5:]  # remove `ssid=` prefix
-        
+
         finally:
             s.close()
             os.unlink(client)
-        
+
         return None
 
     def _handle_ready(self):
