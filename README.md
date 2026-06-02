@@ -9,6 +9,7 @@ Clone the repo into your home directory and run the install script:
 ```sh
 cd ~
 git clone https://github.com/Primus27/klipper_network_status.git
+chmod +x klipper_network_status/install.sh
 bash klipper_network_status/install.sh
 ```
 
