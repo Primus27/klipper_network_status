@@ -6,9 +6,12 @@ Allow gcode macros and display menus to access system network info: IP addresses
 
 Clone the repo into your home directory and run the install script:
 
+> Note: If you have a non-standard klipper install path (i.e. klipper is not in your home directory), add `-k <klipper_path>` to the end of the install script (no trailing slash). If you don't know what this means, ignore this hint.
+
 ```sh
 cd ~
 git clone https://github.com/Primus27/klipper_network_status.git
+chmod +x klipper_network_status/install.sh
 bash klipper_network_status/install.sh
 ```
 
