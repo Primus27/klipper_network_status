@@ -4,6 +4,33 @@ from dataclasses import dataclass, asdict
 from typing import Literal
 import socket
 import threading
+import psutil
+from psutil._ntuples import snicaddr
+
+
+@dataclass
+class InterfaceDetails:
+    ipv4: str | None = None
+    ipv6: str | None = None
+    mac: str | None = None
+
+    @classmethod
+    def from_snicaddrs(cls, snicaddrs: list[snicaddr]):
+        """
+        Create an InterfaceDetails instance from the psutil net_if_addrs interface output
+
+        :param snicaddrs: Psutil's SNICADDR output
+        :return: InterfaceDetails instance
+        """
+        details = cls()
+        for addr in snicaddrs:
+            if addr.family == socket.AF_INET:
+                details.ipv4 = addr.address
+            elif addr.family == socket.AF_INET6:
+                details.ipv6 = addr.address
+            elif addr.family == psutil.AF_LINK:
+                details.mac = addr.address
+        return details
 
 
 @dataclass
@@ -33,6 +60,36 @@ class network_status:
         self.printer.register_event_handler(
             "klippy:disconnect", self._handle_disconnect
         )
+
+    @staticmethod
+    def get_ssid(iface: str = "wlan0") -> str | None:
+        """
+        Get SSID from the interface name via the wpa_supplicant socket
+
+        :param iface: Interface name
+        :return: SSID or None (if interface does not exist or has no SSID)
+        """
+        sock_path = f"/var/run/wpa_supplicant/{iface}"
+        if not os.path.exists(sock_path):
+            return None
+
+        client = f"/tmp/wpa_ctrl_{os.getpid()}"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        s.bind(client)
+
+        try:
+            s.connect(sock_path)
+            s.send(b"STATUS")
+            data = s.recv(4096).decode()
+            for line in data.splitlines():
+                if line.startswith("ssid="):
+                    return line[5:]  # remove `ssid=` prefix
+
+        finally:
+            s.close()
+            os.unlink(client)
+
+        return None
 
     def _handle_ready(self):
         """
@@ -66,21 +123,16 @@ class network_status:
         """
         logging.debug("network_status refresh")
         details = NetworkDetails()
+        network_addrs = psutil.net_if_addrs()
 
-        try:
-            details.ethip = (
-                os.popen("ip addr show eth0").read().split("inet ")[1].split("/")[0]
-            )
-        except Exception:
-            pass
+        eth0_data = InterfaceDetails.from_snicaddrs(network_addrs.get("eth0", []))
+        details.ethip = eth0_data.ipv4 or eth0_data.ipv6 or details.ethip
 
-        try:
-            details.wifiip = (
-                os.popen("ip addr show wlan0").read().split("inet ")[1].split("/")[0]
-            )
-            details.wifissid = os.popen("iwgetid -r").read()[:-1]
-        except Exception:
-            pass
+        wifi0_data = InterfaceDetails.from_snicaddrs(network_addrs.get("wlan0", []))
+        details.wifiip = wifi0_data.ipv4 or wifi0_data.ipv6 or details.wifiip
+
+        if (ssid := self.get_ssid("wlan0")) is not None:
+            details.wifissid = ssid
 
         try:
             details.mdns = socket.gethostname() + ".local"
