@@ -1,68 +1,12 @@
 import os
 import logging
-from dataclasses import dataclass, asdict
-from typing import Literal
+from dataclasses import dataclass, fields, field
 import socket
 import threading
 import psutil
-from psutil._ntuples import snicaddr
 
 
-@dataclass
-class InterfaceDetails:
-    ipv4: str | None = None
-    ipv6: str | None = None
-    mac: str | None = None
-
-    @classmethod
-    def from_snicaddrs(cls, snicaddrs: list[snicaddr]):
-        """
-        Create an InterfaceDetails instance from the psutil net_if_addrs interface output
-
-        :param snicaddrs: Psutil's SNICADDR output
-        :return: InterfaceDetails instance
-        """
-        details = cls()
-        for addr in snicaddrs:
-            if addr.family == socket.AF_INET:
-                details.ipv4 = addr.address
-            elif addr.family == socket.AF_INET6:
-                details.ipv6 = addr.address
-            elif addr.family == psutil.AF_LINK:
-                details.mac = addr.address
-        return details
-
-
-@dataclass
-class NetworkDetails:
-    status: Literal["Connected", "Disconnected", "N/A"] = "N/A"
-    ethip: str = "N/A"
-    wifiip: str = "N/A"
-    wifissid: str = "N/A"
-    mdns: str = "N/A"
-
-
-class network_status:
-    def __init__(self, config):
-        """
-        Init
-
-        :param config: config object from Klipper
-        """
-        self.printer = config.get_printer()
-        self.interval_secs = config.getint("interval", 60, minval=10)
-        self.details = NetworkDetails()
-
-        self.lock = threading.Lock()
-        self.stop_event = threading.Event()
-        self.refresh_thread = None
-        self.printer.register_event_handler("klippy:ready", self._handle_ready)
-        self.printer.register_event_handler(
-            "klippy:disconnect", self._handle_disconnect
-        )
-
-    @staticmethod
-    def get_ssid(iface: str = "wlan0") -> str | None:
+def get_ssid(iface: str) -> str | None:
         """
         Get SSID from the interface name via the wpa_supplicant socket
 
@@ -87,9 +31,102 @@ class network_status:
 
         finally:
             s.close()
-            os.unlink(client)
+            try:
+                os.unlink(client)
+            except OSError:  # Might not exist if connection not created
+                pass
 
         return None
+
+
+@dataclass
+class SerializableMixin:
+    def _serialize(self, value):
+        if isinstance(value, SerializableMixin):
+            return value.to_dict()
+        elif isinstance(value, dict):
+            return {k: self._serialize(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._serialize(v) for v in value]
+        return value
+
+    def to_dict(self):
+        result = {f.name: self._serialize(getattr(self, f.name)) for f in fields(self)}
+        result.update({
+            name: getattr(self, name)
+            for name, val in vars(type(self)).items()
+            if isinstance(val, property)
+        })
+        return result
+
+
+@dataclass
+class InterfaceDetails(SerializableMixin):
+    ipv4: str | None = None
+    ipv6: str | None = None
+    mac: str | None = None
+    ssid: str | None = None
+
+    @property
+    def ip(self):
+        return self.ipv4 or self.ipv6
+
+    @classmethod
+    def from_snicaddrs(cls, iface: str, snicaddrs: list):
+        """
+        Create an InterfaceDetails instance from the psutil net_if_addrs interface output
+
+        :param iface: Interface name
+        :param snicaddrs: Psutil's SNICADDR output
+        :return: InterfaceDetails instance
+        """
+        details = cls()
+
+        if (ssid := get_ssid(iface)) is not None:
+            details.ssid = ssid
+
+        for addr in snicaddrs:
+            if addr.family == socket.AF_INET:
+                details.ipv4 = addr.address
+            elif addr.family == socket.AF_INET6:
+                details.ipv6 = addr.address
+            elif addr.family == psutil.AF_LINK:
+                details.mac = addr.address
+
+        return details
+
+
+@dataclass
+class NetworkDetails(SerializableMixin):
+    mdns: str | None = field(default=None)
+    interfaces: dict[str, InterfaceDetails] = field(default_factory=dict)
+
+    @property
+    def status(self):
+        for interface in self.interfaces.values():
+            if interface.ip is not None:
+                return "Connected"
+        return "Disconnected"
+
+
+class network_status:
+    def __init__(self, config):
+        """
+        Init
+
+        :param config: config object from Klipper
+        """
+        self.printer = config.get_printer()
+        self.interval_secs = config.getint("interval", 60, minval=10)
+        self.details = NetworkDetails()
+
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.refresh_thread = None
+        self.printer.register_event_handler("klippy:ready", self._handle_ready)
+        self.printer.register_event_handler(
+            "klippy:disconnect", self._handle_disconnect
+        )
 
     def _handle_ready(self):
         """
@@ -123,27 +160,16 @@ class network_status:
         """
         logging.debug("network_status refresh")
         details = NetworkDetails()
+        
         network_addrs = psutil.net_if_addrs()
+        _ = network_addrs.pop("lo", None)
 
-        eth0_data = InterfaceDetails.from_snicaddrs(network_addrs.get("eth0", []))
-        details.ethip = eth0_data.ipv4 or eth0_data.ipv6 or details.ethip
-
-        wifi0_data = InterfaceDetails.from_snicaddrs(network_addrs.get("wlan0", []))
-        details.wifiip = wifi0_data.ipv4 or wifi0_data.ipv6 or details.wifiip
-
-        if (ssid := self.get_ssid("wlan0")) is not None:
-            details.wifissid = ssid
+        details.interfaces = {k: InterfaceDetails.from_snicaddrs(k, v) for k, v in network_addrs.items()}
 
         try:
             details.mdns = socket.gethostname() + ".local"
         except Exception:
             pass
-
-        details.status = (
-            "Connected"
-            if details.ethip != "N/A" or details.wifiip != "N/A"
-            else "Disconnected"
-        )
 
         with self.lock:
             self.details = details
@@ -155,7 +181,7 @@ class network_status:
         :return: Network details
         """
         with self.lock:
-            return asdict(self.details)
+            return self.details.to_dict()
 
 
 def load_config(config):
