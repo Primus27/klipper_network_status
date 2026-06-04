@@ -8,36 +8,36 @@ import psutil
 
 
 def get_ssid(iface: str) -> str | None:
-        """
-        Get SSID from the interface name via the wpa_supplicant socket
+    """
+    Get SSID from the interface name via the wpa_supplicant socket
 
-        :param iface: Interface name
-        :return: SSID or None (if interface does not exist or has no SSID)
-        """
-        sock_path = f"/var/run/wpa_supplicant/{iface}"
-        if not os.path.exists(sock_path):
-            return None
-
-        client = f"/tmp/wpa_ctrl_{os.getpid()}"
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        s.bind(client)
-
-        try:
-            s.connect(sock_path)
-            s.send(b"STATUS")
-            data = s.recv(4096).decode()
-            for line in data.splitlines():
-                if line.startswith("ssid="):
-                    return line[5:]  # remove `ssid=` prefix
-
-        finally:
-            s.close()
-            try:
-                os.unlink(client)
-            except OSError:  # Might not exist if connection not created
-                pass
-
+    :param iface: Interface name
+    :return: SSID or None (if interface does not exist or has no SSID)
+    """
+    sock_path = f"/var/run/wpa_supplicant/{iface}"
+    if not os.path.exists(sock_path):
         return None
+
+    client = f"/tmp/wpa_ctrl_{os.getpid()}"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    s.bind(client)
+
+    try:
+        s.connect(sock_path)
+        s.send(b"STATUS")
+        data = s.recv(4096).decode()
+        for line in data.splitlines():
+            if line.startswith("ssid="):
+                return line[5:]  # remove `ssid=` prefix
+
+    finally:
+        s.close()
+        try:
+            os.unlink(client)
+        except OSError:  # Might not exist if connection not created
+            pass
+
+    return None
 
 
 @dataclass
@@ -53,11 +53,13 @@ class SerializableMixin:
 
     def to_dict(self):
         result = {f.name: self._serialize(getattr(self, f.name)) for f in fields(self)}
-        result.update({
-            name: getattr(self, name)
-            for name, val in vars(type(self)).items()
-            if isinstance(val, property)
-        })
+        result.update(
+            {
+                name: getattr(self, name)
+                for name, val in vars(type(self)).items()
+                if isinstance(val, property)
+            }
+        )
         return result
 
 
@@ -161,11 +163,13 @@ class network_status:
         """
         logging.debug("network_status refresh")
         details = NetworkDetails()
-        
+
         network_addrs = psutil.net_if_addrs()
         _ = network_addrs.pop("lo", None)
 
-        details.interfaces = {k: InterfaceDetails.from_snicaddrs(k, v) for k, v in network_addrs.items()}
+        details.interfaces = {
+            k: InterfaceDetails.from_snicaddrs(k, v) for k, v in network_addrs.items()
+        }
 
         try:
             details.mdns = socket.gethostname() + ".local"
