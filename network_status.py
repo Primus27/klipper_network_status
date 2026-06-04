@@ -43,6 +43,7 @@ def get_ssid(iface: str) -> str | None:
 @dataclass
 class SerializableMixin:
     """Inheritable class to serialize dataclasses w/ properties"""
+
     def _serialize(self, value):
         if isinstance(value, SerializableMixin):
             return value.to_dict()
