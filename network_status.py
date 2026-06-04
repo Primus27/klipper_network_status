@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass, fields, field
 import socket
 import threading
+from typing import Any
 import psutil
 
 
@@ -118,7 +119,7 @@ class network_status:
         """
         self.printer = config.get_printer()
         self.interval_secs = config.getint("interval", 60, minval=10)
-        self.details = NetworkDetails()
+        self.details: dict[str, Any] = NetworkDetails().to_dict()
 
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -172,7 +173,7 @@ class network_status:
             pass
 
         with self.lock:
-            self.details = details
+            self.details = details.to_dict()  # Pre-serialised
 
     def get_status(self, eventtime) -> dict:
         """
@@ -181,7 +182,7 @@ class network_status:
         :return: Network details
         """
         with self.lock:
-            return self.details.to_dict()
+            return self.details
 
 
 def load_config(config):
