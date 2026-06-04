@@ -42,6 +42,7 @@ def get_ssid(iface: str) -> str | None:
 
 @dataclass
 class SerializableMixin:
+    """Inheritable class to serialize dataclasses w/ properties"""
     def _serialize(self, value):
         if isinstance(value, SerializableMixin):
             return value.to_dict()
@@ -51,7 +52,12 @@ class SerializableMixin:
             return [self._serialize(v) for v in value]
         return value
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Serialize the dataclass instance to a dictionary, including properties.
+
+        :return: Dictionary representation of the dataclass.
+        """
         result = {f.name: self._serialize(getattr(self, f.name)) for f in fields(self)}
         result.update(
             {
@@ -72,6 +78,7 @@ class InterfaceDetails(SerializableMixin):
 
     @property
     def ip(self):
+        """Convenient attribute to just grab any IP without requiring conditionals from client"""
         return self.ipv4 or self.ipv6
 
     @classmethod
@@ -115,7 +122,7 @@ class NetworkDetails(SerializableMixin):
 class network_status:
     def __init__(self, config):
         """
-        Init
+        Main klipper class
 
         :param config: config object from Klipper
         """
