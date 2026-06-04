@@ -45,21 +45,33 @@ interval: 30
 ## Usage
 
 Network details are exposed as printer objects and can be referenced in macros
-and display menus as `printer.network_status.<field>`:
+and display menus as `printer.network_status.<field>`.
+
+### Top-level fields
 
 | Field | Description | Example |
 |-------|-------------|---------|
 | `status` | Connection status | `Connected` |
-| `ethip` | Ethernet IP address (ipv4 w/ ipv6 fallback) | `192.168.1.10` |
-| `wifiip` | Wi-Fi IP address (ipv4 w/ ipv6 fallback) | `192.168.1.11` |
-| `wifissid` | Wi-Fi network name | `MyNetwork` |
 | `mdns` | mDNS hostname | `printer.local` |
+| `interfaces` | Per-interface details, keyed by interface name | — |
 
-Fields return `N/A` if the information is unavailable.
+### Per-interface fields
+
+Accessed as `printer.network_status.interfaces.<name>.<field>`, where `<name>` is the interface name (e.g. `eth0`, `wlan0`).
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `ip` | IP address (IPv4 if available, else IPv6) | `192.168.1.10` |
+| `ipv4` | IPv4 address | `192.168.1.10` |
+| `ipv6` | IPv6 address | `fe80::1` |
+| `mac` | MAC address | `aa:bb:cc:dd:ee:ff` |
+| `ssid` | Wi-Fi network name (Wi-Fi interfaces only) | `MyNetwork` |
+
+Fields return `None` if the information is unavailable.
 
 ### Example: display menu
 
-Add a Network submenu to your display config:
+Add a Network submenu to your display config. Replace `eth0` and `wlan0` with your actual interface names:
 
 ```ini
 [menu __main __network]
@@ -76,13 +88,13 @@ name: mDNS: {printer.network_status.mdns}
 
 [menu __main __network _ethip]
 type: command
-name: Eth IP: {printer.network_status.ethip}
+name: Eth IP: {printer.network_status.interfaces.eth0.ip}
 
 [menu __main __network _wifissid]
 type: command
-name: Wifi SSID: {printer.network_status.wifissid}
+name: Wifi SSID: {printer.network_status.interfaces.wlan0.ssid}
 
 [menu __main __network _wifiip]
 type: command
-name: Wifi IP: {printer.network_status.wifiip}
+name: Wifi IP: {printer.network_status.interfaces.wlan0.ip}
 ```

@@ -1,28 +1,101 @@
 import os
 import logging
-from dataclasses import dataclass, asdict
-from typing import Literal
+from dataclasses import dataclass, fields, field
 import socket
 import threading
+from typing import Any
 import psutil
-from psutil._ntuples import snicaddr
+
+
+def get_ssid(iface: str) -> str | None:
+    """
+    Get SSID from the interface name via the wpa_supplicant socket
+
+    :param iface: Interface name
+    :return: SSID or None (if interface does not exist or has no SSID)
+    """
+    sock_path = f"/var/run/wpa_supplicant/{iface}"
+    if not os.path.exists(sock_path):
+        return None
+
+    client = f"/tmp/wpa_ctrl_{os.getpid()}"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    s.bind(client)
+
+    try:
+        s.connect(sock_path)
+        s.send(b"STATUS")
+        data = s.recv(4096).decode()
+        for line in data.splitlines():
+            if line.startswith("ssid="):
+                return line[5:]  # remove `ssid=` prefix
+
+    finally:
+        s.close()
+        try:
+            os.unlink(client)
+        except OSError:  # Might not exist if connection not created
+            pass
+
+    return None
 
 
 @dataclass
-class InterfaceDetails:
+class SerializableMixin:
+    """Inheritable class to serialize dataclasses w/ properties"""
+
+    def _serialize(self, value):
+        if isinstance(value, SerializableMixin):
+            return value.to_dict()
+        elif isinstance(value, dict):
+            return {k: self._serialize(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._serialize(v) for v in value]
+        return value
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Serialize the dataclass instance to a dictionary, including properties.
+
+        :return: Dictionary representation of the dataclass.
+        """
+        result = {f.name: self._serialize(getattr(self, f.name)) for f in fields(self)}
+        result.update(
+            {
+                name: getattr(self, name)
+                for name, val in vars(type(self)).items()
+                if isinstance(val, property)
+            }
+        )
+        return result
+
+
+@dataclass
+class InterfaceDetails(SerializableMixin):
     ipv4: str | None = None
     ipv6: str | None = None
     mac: str | None = None
+    ssid: str | None = None
+
+    @property
+    def ip(self):
+        """Convenient attribute to just grab any IP without requiring conditionals from client"""
+        return self.ipv4 or self.ipv6
 
     @classmethod
-    def from_snicaddrs(cls, snicaddrs: list[snicaddr]):
+    def from_snicaddrs(cls, iface: str, snicaddrs: list):
         """
         Create an InterfaceDetails instance from the psutil net_if_addrs interface output
 
+        :param iface: Interface name
         :param snicaddrs: Psutil's SNICADDR output
         :return: InterfaceDetails instance
         """
         details = cls()
+
+        if (ssid := get_ssid(iface)) is not None:
+            details.ssid = ssid
+
         for addr in snicaddrs:
             if addr.family == socket.AF_INET:
                 details.ipv4 = addr.address
@@ -30,28 +103,33 @@ class InterfaceDetails:
                 details.ipv6 = addr.address
             elif addr.family == psutil.AF_LINK:
                 details.mac = addr.address
+
         return details
 
 
 @dataclass
-class NetworkDetails:
-    status: Literal["Connected", "Disconnected", "N/A"] = "N/A"
-    ethip: str = "N/A"
-    wifiip: str = "N/A"
-    wifissid: str = "N/A"
-    mdns: str = "N/A"
+class NetworkDetails(SerializableMixin):
+    mdns: str | None = field(default=None)
+    interfaces: dict[str, InterfaceDetails] = field(default_factory=dict)
+
+    @property
+    def status(self):
+        for interface in self.interfaces.values():
+            if interface.ip is not None:
+                return "Connected"
+        return "Disconnected"
 
 
-class network_status:
+class NetworkStatus:
     def __init__(self, config):
         """
-        Init
+        Main klipper class
 
         :param config: config object from Klipper
         """
         self.printer = config.get_printer()
         self.interval_secs = config.getint("interval", 60, minval=10)
-        self.details = NetworkDetails()
+        self.details: dict[str, Any] = NetworkDetails().to_dict()
 
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
@@ -60,36 +138,6 @@ class network_status:
         self.printer.register_event_handler(
             "klippy:disconnect", self._handle_disconnect
         )
-
-    @staticmethod
-    def get_ssid(iface: str = "wlan0") -> str | None:
-        """
-        Get SSID from the interface name via the wpa_supplicant socket
-
-        :param iface: Interface name
-        :return: SSID or None (if interface does not exist or has no SSID)
-        """
-        sock_path = f"/var/run/wpa_supplicant/{iface}"
-        if not os.path.exists(sock_path):
-            return None
-
-        client = f"/tmp/wpa_ctrl_{os.getpid()}"
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        s.bind(client)
-
-        try:
-            s.connect(sock_path)
-            s.send(b"STATUS")
-            data = s.recv(4096).decode()
-            for line in data.splitlines():
-                if line.startswith("ssid="):
-                    return line[5:]  # remove `ssid=` prefix
-
-        finally:
-            s.close()
-            os.unlink(client)
-
-        return None
 
     def _handle_ready(self):
         """
@@ -123,30 +171,21 @@ class network_status:
         """
         logging.debug("network_status refresh")
         details = NetworkDetails()
+
         network_addrs = psutil.net_if_addrs()
+        _ = network_addrs.pop("lo", None)
 
-        eth0_data = InterfaceDetails.from_snicaddrs(network_addrs.get("eth0", []))
-        details.ethip = eth0_data.ipv4 or eth0_data.ipv6 or details.ethip
-
-        wifi0_data = InterfaceDetails.from_snicaddrs(network_addrs.get("wlan0", []))
-        details.wifiip = wifi0_data.ipv4 or wifi0_data.ipv6 or details.wifiip
-
-        if (ssid := self.get_ssid("wlan0")) is not None:
-            details.wifissid = ssid
+        details.interfaces = {
+            k: InterfaceDetails.from_snicaddrs(k, v) for k, v in network_addrs.items()
+        }
 
         try:
             details.mdns = socket.gethostname() + ".local"
         except Exception:
             pass
 
-        details.status = (
-            "Connected"
-            if details.ethip != "N/A" or details.wifiip != "N/A"
-            else "Disconnected"
-        )
-
         with self.lock:
-            self.details = details
+            self.details = details.to_dict()  # Pre-serialised
 
     def get_status(self, eventtime) -> dict:
         """
@@ -155,8 +194,8 @@ class network_status:
         :return: Network details
         """
         with self.lock:
-            return asdict(self.details)
+            return self.details
 
 
 def load_config(config):
-    return network_status(config)
+    return NetworkStatus(config)
