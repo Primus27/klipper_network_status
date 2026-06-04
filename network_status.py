@@ -119,7 +119,7 @@ class NetworkDetails(SerializableMixin):
         return "Disconnected"
 
 
-class network_status:
+class NetworkStatus:
     def __init__(self, config):
         """
         Main klipper class
@@ -197,4 +197,4 @@ class network_status:
 
 
 def load_config(config):
-    return network_status(config)
+    return NetworkStatus(config)
