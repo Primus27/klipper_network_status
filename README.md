@@ -6,7 +6,11 @@ Allow gcode macros and display menus to access system network info: IP addresses
 
 Clone the repo into your home directory and run the install script:
 
-> Note: If you have a non-standard klipper install path (i.e. klipper is not in your home directory), add `-k <klipper_path>` to the end of the install script (no trailing slash). If you don't know what this means, ignore this hint.
+> Note: The install script accepts two optional flags:
+> - `-k <klipper_path>` - path to your Klipper directory (default: `~/klipper`)
+> - `-e <venv_path>` - path to your Klipper virtualenv (default: `~/klippy-env`)
+>
+> If you don't know what this means, ignore this hint.
 
 ```sh
 cd ~
@@ -22,7 +26,7 @@ Then add the following to your `moonraker.conf` to enable automatic updates:
 type: git_repo
 path: ~/klipper_network_status
 origin: https://github.com/Primus27/klipper_network_status.git
-virtualenv: ~/.klippy-env
+virtualenv: ~/klippy-env
 requirements: requirements.txt
 managed_services: klipper
 ```
